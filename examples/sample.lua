@@ -1,0 +1,262 @@
+-- komado.nvim sample sidebar.
+--
+-- A single sidebar window stacks several self-contained "modules" vertically, each with its own `update` triggers and helpers.
+-- Modules below are intentionally independent — copy any of them into your own config and rearrange freely.
+--
+-- Run via:  nix run .#demo
+-- Or:       nvim --cmd "set rtp+=." -c "luafile examples/sample.lua" -c KomadoOpen
+
+local komado = require("komado")
+local Line = require("komado.dsl").Line
+local utils = require("komado.utils")
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Module: Header (static)
+-- ─────────────────────────────────────────────────────────────────────────
+local Header = {
+  Line({
+    { provider = "■ ", hl = "Statement" },
+    { provider = "komado", hl = "Title" },
+    { provider = " sample", hl = "Comment" },
+  }),
+  utils.separator("─", "Comment"),
+}
+
+local Spacer = Line({ provider = "" })
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Module: FileInfo
+--   Re-renders on BufEnter / DirChanged.
+--   Uses parent init() to compute values once per evaluation and have children pull them via `self.*`.
+-- ─────────────────────────────────────────────────────────────────────────
+local FileInfo = {
+  update = { "BufEnter", "DirChanged" },
+  init = function(self)
+    self.cwd = vim.fn.getcwd()
+    self.bufname = vim.fn.bufname("%")
+    self.ft = vim.bo.filetype
+  end,
+  Line({ provider = "▸ File", hl = "Statement" }),
+  Line({
+    { provider = "  cwd: ", hl = "Comment" },
+    {
+      provider = function(self)
+        return self.cwd
+      end,
+    },
+  }),
+  Line({
+    { provider = "  buf: ", hl = "Comment" },
+    {
+      provider = function(self)
+        return self.bufname ~= "" and self.bufname or "[No Name]"
+      end,
+    },
+  }),
+  Line({
+    { provider = "  ft : ", hl = "Comment" },
+    {
+      provider = function(self)
+        return self.ft ~= "" and self.ft or "-"
+      end,
+    },
+  }),
+}
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Module: Buffers
+--   Listed buffers with `<CR>` to switch and `d` to delete.
+--   `<LeftMouse>` is auto-mapped to the same dispatch as `<CR>`, so clicking a row works.
+-- ─────────────────────────────────────────────────────────────────────────
+local function listed_buffers()
+  local out = {}
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.bo[b].buflisted and vim.api.nvim_buf_is_loaded(b) then
+      local name = vim.api.nvim_buf_get_name(b)
+      out[#out + 1] = {
+        bufnr = b,
+        modified = vim.bo[b].modified,
+        current = b == vim.api.nvim_get_current_buf(),
+        display = (name ~= "" and vim.fn.fnamemodify(name, ":~:.")) or "[No Name]",
+      }
+    end
+  end
+  return out
+end
+
+local Buffers = {
+  update = { "BufAdd", "BufDelete", "BufEnter", "BufModifiedSet" },
+  Line({ provider = "▸ Buffers", hl = "Statement" }),
+  utils.expandable_list(function()
+    return listed_buffers()
+  end, function(item)
+    local marker = item.current and "▸ " or "  "
+    local mod = item.modified and " [+]" or ""
+    return Line({
+      on_select = function(_, ctx)
+        vim.cmd("wincmd p")
+        vim.api.nvim_set_current_buf(ctx.ctx.item.bufnr)
+      end,
+      { provider = marker, hl = item.current and "Statement" or "Comment" },
+      { provider = tostring(item.bufnr), hl = "Number" },
+      { provider = " " },
+      { provider = item.display, hl = item.current and "Statement" or "Normal" },
+      { provider = mod, hl = "WarningMsg" },
+    })
+  end),
+}
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Module: Marks (conditional — only renders when global marks exist)
+-- ─────────────────────────────────────────────────────────────────────────
+local function global_marks()
+  local out = {}
+  for _, m in ipairs(vim.fn.getmarklist()) do
+    if m.mark:match("^'[A-Z0-9]$") then
+      out[#out + 1] = {
+        mark = m.mark:sub(2),
+        file = m.file or "",
+        lnum = (m.pos or {})[2] or 0,
+      }
+    end
+  end
+  return out
+end
+
+-- Note: condition() runs *before* init() in komado, so any value consumed by condition must be computed inside it (or before _eval).
+-- Here we side-effect into self.marks so the children can read it via metatable.
+local Marks = {
+  update = { "BufEnter", "CursorHold" },
+  condition = function(self)
+    self.marks = global_marks()
+    return #self.marks > 0
+  end,
+  Line({ provider = "▸ Marks", hl = "Statement" }),
+  utils.expandable_list(function(self)
+    return self.marks
+  end, function(m)
+    return Line({
+      on_select = function(_, ctx)
+        local mark = ctx.ctx.item
+        if mark.file == "" then
+          return
+        end
+        vim.cmd("wincmd p")
+        vim.cmd("edit " .. vim.fn.fnameescape(mark.file))
+        if mark.lnum > 0 then
+          pcall(vim.api.nvim_win_set_cursor, 0, { mark.lnum, 0 })
+        end
+      end,
+      { provider = "  " },
+      { provider = m.mark, hl = "Identifier" },
+      { provider = "  " },
+      { provider = m.file ~= "" and vim.fn.fnamemodify(m.file, ":t") or "?", hl = "Directory" },
+      { provider = ":", hl = "Comment" },
+      { provider = tostring(m.lnum), hl = "Number" },
+    })
+  end),
+}
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Module: Clock
+--   Driven by a 1s libuv timer that fires `User KomadoTick`.
+--   komado's update pipeline invalidates the per-state cache for any component listening on that event and schedules a redraw, so the displayed time advances even when the user is idle (CursorHold alone wouldn't be enough).
+-- ─────────────────────────────────────────────────────────────────────────
+local clock_timer
+local function ensure_clock_timer()
+  if clock_timer then
+    return
+  end
+  clock_timer = vim.uv.new_timer()
+  if not clock_timer then
+    return
+  end
+  clock_timer:start(
+    1000,
+    1000,
+    vim.schedule_wrap(function()
+      pcall(vim.api.nvim_exec_autocmds, "User", {
+        pattern = "KomadoTick",
+        modeline = false,
+      })
+    end)
+  )
+end
+ensure_clock_timer()
+
+local Clock = {
+  update = { "User", pattern = "KomadoTick" },
+  Line({
+    { provider = "▸ ", hl = "Comment" },
+    {
+      provider = function()
+        return os.date("%Y-%m-%d")
+      end,
+      hl = "Comment",
+    },
+    utils.horizontal_align(),
+    {
+      provider = function()
+        return os.date("%H:%M:%S")
+      end,
+      hl = "String",
+    },
+  }),
+}
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Compose: a single sidebar that stacks the modules vertically.
+-- `utils.vertical_align()` behaves like statusline's `%=`, filling the remaining height before Clock.
+-- ─────────────────────────────────────────────────────────────────────────
+komado.setup({
+  -- Width = 30% of editor width, but never below 38 nor above 80 columns.
+  window = {
+    position = "left",
+    size = { ratio = 0.3, min = 38, max = 80 },
+  },
+  buffer = { filetype = "komado-sample" },
+  -- `<CR>` and `<LeftMouse>` are auto-mapped to invoke the row's `on_select` (each Line above defines its own).
+  -- Override either by listing it here.
+  mappings = {
+    ["q"] = function()
+      komado.close()
+    end,
+    ["r"] = function()
+      komado.redraw()
+    end,
+    ["d"] = "delete_buffer",
+  },
+  commands = {
+    delete_buffer = function(_, ctx)
+      if not ctx or not ctx.ctx or not ctx.ctx.item or not ctx.ctx.item.bufnr then
+        return
+      end
+      pcall(vim.api.nvim_buf_delete, ctx.ctx.item.bufnr, { force = false })
+      komado.redraw()
+    end,
+  },
+  root = {
+    Header,
+    Spacer,
+    FileInfo,
+    Spacer,
+    Buffers,
+    Spacer,
+    Marks,
+    utils.vertical_align(),
+    Clock,
+  },
+})
+
+vim.api.nvim_create_user_command("KomadoOpen", function()
+  komado.open()
+end, {})
+vim.api.nvim_create_user_command("KomadoClose", function()
+  komado.close()
+end, {})
+vim.api.nvim_create_user_command("KomadoToggle", function()
+  komado.toggle()
+end, {})
+vim.api.nvim_create_user_command("KomadoRedraw", function()
+  komado.redraw()
+end, {})
