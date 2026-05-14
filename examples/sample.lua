@@ -107,6 +107,196 @@ local Buffers = {
 }
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- Module: GitStatus
+--   A small `git status --short` view with foldable sections.
+-- ─────────────────────────────────────────────────────────────────────────
+local function git_start_dir()
+  local name = vim.api.nvim_buf_get_name(0)
+  if name ~= "" then
+    local stat = vim.uv.fs_stat(name)
+    if stat and stat.type == "directory" then
+      return name
+    end
+    return vim.fs.dirname(name)
+  end
+  return vim.fn.getcwd()
+end
+
+local function git_lines(root, args)
+  local cmd = { "git", "-C", root }
+  vim.list_extend(cmd, args)
+  local lines = vim.fn.systemlist(cmd)
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+  return lines
+end
+
+local function git_root()
+  local lines = git_lines(git_start_dir(), { "rev-parse", "--show-toplevel" })
+  return lines and lines[1] ~= "" and lines[1] or nil
+end
+
+local function git_status()
+  local root = git_root()
+  if not root then
+    return nil
+  end
+
+  local lines = git_lines(root, { "status", "--short", "--branch", "--untracked-files=normal" }) or {}
+  local status = {
+    root = root,
+    branch = "unknown",
+    staged = {},
+    unstaged = {},
+    untracked = {},
+  }
+
+  for _, line in ipairs(lines) do
+    if line:sub(1, 2) == "##" then
+      status.branch = line:sub(4)
+    elseif line ~= "" then
+      local xy = line:sub(1, 2)
+      local x = xy:sub(1, 1)
+      local y = xy:sub(2, 2)
+      local path = line:sub(4)
+      if xy == "??" then
+        status.untracked[#status.untracked + 1] = { code = "?", path = path }
+      else
+        if x ~= " " then
+          status.staged[#status.staged + 1] = { code = x, path = path }
+        end
+        if y ~= " " then
+          status.unstaged[#status.unstaged + 1] = { code = y, path = path }
+        end
+      end
+    end
+  end
+
+  return status
+end
+
+local function git_file_target(path)
+  return path:match(".+ %-> (.+)$") or path
+end
+
+local function git_rows(status, collapsed)
+  local rows = {
+    {
+      kind = "root",
+      label = "Git",
+      branch = status and status.branch or "not a git repository",
+      clean = status and #status.staged == 0 and #status.unstaged == 0 and #status.untracked == 0,
+    },
+  }
+
+  if not status then
+    return rows
+  end
+
+  local sections = {
+    { key = "staged", label = "Staged", items = status.staged },
+    { key = "unstaged", label = "Unstaged", items = status.unstaged },
+    { key = "untracked", label = "Untracked", items = status.untracked },
+  }
+
+  for _, section in ipairs(sections) do
+    if #section.items > 0 then
+      rows[#rows + 1] = {
+        kind = "section",
+        key = section.key,
+        label = section.label,
+        count = #section.items,
+        collapsed = collapsed[section.key],
+      }
+      if not collapsed[section.key] then
+        for _, item in ipairs(section.items) do
+          rows[#rows + 1] = {
+            kind = "file",
+            root = status.root,
+            code = item.code,
+            path = item.path,
+          }
+        end
+      end
+    end
+  end
+
+  if #rows == 1 and rows[1].clean then
+    rows[#rows + 1] = { kind = "message", text = "  clean" }
+  end
+  return rows
+end
+
+local git_status_hl = {
+  ["?"] = "Comment",
+  A = "String",
+  C = "Identifier",
+  D = "ErrorMsg",
+  M = "WarningMsg",
+  R = "Identifier",
+  U = "ErrorMsg",
+}
+
+local GitStatus = {
+  static = {
+    collapsed = {
+      staged = false,
+      unstaged = false,
+      untracked = false,
+    },
+  },
+  init = function(self)
+    self.status = git_status()
+    self.rows = git_rows(self.status, self.collapsed)
+  end,
+  {
+    update = { "BufEnter", "BufWritePost", "DirChanged", "FocusGained", "ShellCmdPost" },
+  },
+  utils.expandable_list(function(self)
+    return self.rows
+  end, function(item)
+    if item.kind == "root" then
+      return Line({
+        { provider = "▸ Git", hl = "Statement" },
+        { provider = " " },
+        { provider = item.branch, hl = item.clean and "String" or "Comment" },
+      })
+    end
+
+    if item.kind == "section" then
+      return Line({
+        on_select = function(self, ctx)
+          local key = ctx.ctx.item.key
+          self.collapsed[key] = not self.collapsed[key]
+          komado.redraw()
+        end,
+        { provider = item.collapsed and "  ▸ " or "  ▾ ", hl = "Comment" },
+        { provider = item.label, hl = "Identifier" },
+        { provider = " " },
+        { provider = tostring(item.count), hl = "Number" },
+      })
+    end
+
+    if item.kind == "file" then
+      return Line({
+        on_select = function(_, ctx)
+          local selected = ctx.ctx.item
+          vim.cmd("wincmd p")
+          vim.cmd("edit " .. vim.fn.fnameescape(selected.root .. "/" .. git_file_target(selected.path)))
+        end,
+        { provider = "    " },
+        { provider = item.code, hl = git_status_hl[item.code] or "Comment" },
+        { provider = "  " },
+        { provider = item.path },
+      })
+    end
+
+    return Line({ provider = item.text, hl = "Comment" })
+  end),
+}
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Module: Marks (conditional — renders buffer-local and global marks)
 -- ─────────────────────────────────────────────────────────────────────────
 local function collect_marks()
@@ -263,6 +453,8 @@ komado.setup({
     FileInfo,
     Spacer,
     Buffers,
+    Spacer,
+    GitStatus,
     Spacer,
     Marks,
     utils.vertical_align(),
