@@ -14,7 +14,7 @@ local function new_buffer(opts)
   }
 end
 
-local function new_line(comp_id, self_ref, ctx, on_select)
+local function new_line(comp_id, self_ref, ctx, mappings)
   return {
     text = "",
     segs = {},
@@ -22,7 +22,7 @@ local function new_line(comp_id, self_ref, ctx, on_select)
     comp_id = comp_id,
     self_ref = self_ref,
     ctx = ctx,
-    on_select = on_select,
+    mappings = mappings,
   }
 end
 
@@ -94,7 +94,7 @@ local function flush(buf)
       comp_id = cur.comp_id,
       self_ref = cur.self_ref,
       ctx = cur.ctx,
-      on_select = cur.on_select,
+      mappings = cur.mappings,
     }
   end
   buf.current = nil
@@ -171,7 +171,7 @@ local function traverse(tree, buf)
         if buf.current then
           flush(buf)
         end
-        buf.current = new_line(node.comp, node.self_ref, node.ctx, node.on_select)
+        buf.current = new_line(node.comp, node.self_ref, node.ctx, node.mappings)
       elseif node._komado_close then
         ensure_current(buf)
         flush(buf)

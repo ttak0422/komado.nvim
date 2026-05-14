@@ -1,19 +1,72 @@
 local M = {}
 
-local function invoke_on_select(ctx)
-  if ctx and type(ctx.on_select) == "function" then
-    ctx.on_select(ctx.self_ref, ctx)
+local function each_lhs(lhs, fn)
+  if type(lhs) == "table" then
+    for _, one in ipairs(lhs) do
+      if type(one) == "string" then
+        fn(one)
+      end
+    end
+  elseif type(lhs) == "string" then
+    fn(lhs)
   end
 end
 
----Default mapping invoked by `<CR>`.
----Looks up the row's `on_select` (set on its owning Line component) and runs it.
----User mappings registered after the defaults can override the same lhs.
-local function dispatch_select(state)
-  invoke_on_select(state:get_context())
+local function iter_line_mappings(ctx, fn)
+  local mappings = ctx and ctx.mappings
+  if type(mappings) ~= "table" then
+    return
+  end
+
+  for key, spec in pairs(mappings) do
+    if type(key) == "table" or type(spec) == "function" or type(spec) == "string" then
+      fn(key, spec)
+    elseif type(spec) == "table" then
+      fn(spec.lhs or key, spec.callback or spec[1])
+    end
+  end
 end
 
----Mouse variant of dispatch_select.
+local function find_line_rhs(ctx, lhs)
+  local found
+  iter_line_mappings(ctx, function(candidate_lhs, rhs)
+    if found then
+      return
+    end
+    each_lhs(candidate_lhs, function(one)
+      if one == lhs then
+        found = rhs
+      end
+    end)
+  end)
+  if found then
+    return found
+  end
+  return nil
+end
+
+local function invoke_rhs(state, rhs, ctx)
+  if type(rhs) == "string" then
+    local fn = state.commands[rhs]
+    if not fn then
+      vim.notify("komado: unknown command " .. rhs, vim.log.levels.WARN)
+      return
+    end
+    fn(state, ctx)
+  elseif type(rhs) == "function" then
+    rhs(ctx and ctx.self_ref, ctx)
+  end
+end
+
+local function dispatch_line_mapping(state, lhs, ctx)
+  ctx = ctx or state:get_context()
+  local rhs = find_line_rhs(ctx, lhs)
+  if rhs then
+    invoke_rhs(state, rhs, ctx)
+  end
+end
+
+---Mouse variant of the row-local mapping dispatcher.
 ---Bound to `<LeftMouse>` so the action fires at button-down time (matching common UI expectations) rather than on release.
 ---Because mapping `<LeftMouse>` steals Neovim's default "cursor-to-click" behaviour, we recover the click target via `vim.fn.getmousepos()` and move the cursor explicitly for visual feedback.
 local function dispatch_select_at_mouse(state)
@@ -26,7 +79,7 @@ local function dispatch_select_at_mouse(state)
     return
   end
   pcall(vim.api.nvim_win_set_cursor, state.winid, { row, 0 })
-  invoke_on_select(state.line_meta[row])
+  dispatch_line_mapping(state, "<LeftMouse>", state.line_meta[row])
 end
 
 local function collect_visual_rows()
@@ -99,8 +152,8 @@ local function set_buffer_keymap(state, mode, lhs, rhs, suffix)
   })
 end
 
----Register the user's mappings on the state's bufnr.
----`<CR>` and `<LeftMouse>` are pre-mapped to dispatch the row's `on_select`; user mappings override them by reusing the same lhs.
+---Register sidebar-wide mappings and row-local mapping dispatchers on the state's bufnr.
+---User setup mappings are registered last and may override row-local dispatch for the same lhs.
 ---@param state table
 function M.attach(state)
   local mappings = state.spec.mappings or {}
@@ -109,13 +162,26 @@ function M.attach(state)
     return
   end
 
-  -- Defaults first; user mappings may overwrite either lhs.
-  set_buffer_keymap(state, "n", "<CR>", function()
-    dispatch_select(state)
-  end)
-  set_buffer_keymap(state, "n", "<LeftMouse>", function()
-    dispatch_select_at_mouse(state)
-  end)
+  local line_lhs = {}
+  for _, ctx in pairs(state.line_meta or {}) do
+    iter_line_mappings(ctx, function(lhs, _)
+      each_lhs(lhs, function(one)
+        line_lhs[one] = true
+      end)
+    end)
+  end
+
+  for lhs, _ in pairs(line_lhs) do
+    if lhs == "<LeftMouse>" then
+      set_buffer_keymap(state, "n", lhs, function()
+        dispatch_select_at_mouse(state)
+      end)
+    else
+      set_buffer_keymap(state, "n", lhs, function()
+        dispatch_line_mapping(state, lhs)
+      end)
+    end
+  end
 
   for lhs, rhs in pairs(mappings) do
     local n_handler = build_normal_handler(state, rhs)

@@ -13,7 +13,7 @@ local default_restrict = {
   restrict = true,
   pick_child = true,
   after = true,
-  on_select = true,
+  mappings = true,
   update = true,
   fallthrough = true,
   vertical_align = true,
@@ -108,7 +108,7 @@ end
 ---@field init? fun(self)
 ---@field provider? string|string[]|fun(self):(string|string[])
 ---@field after? fun(self)
----@field on_select? fun(self, ctx)
+---@field mappings? table row-local key handlers
 ---@field vertical_align? boolean  vertical alignment marker resolved by render.collect
 ---@field horizontal_align? boolean  horizontal alignment marker resolved within the current line
 ---@field restrict? table<string, true>
@@ -141,7 +141,7 @@ function Component:new(child, index)
   new.init = child.init
   new.provider = child.provider
   new.after = child.after
-  new.on_select = child.on_select -- function or nil
+  new.mappings = copy_user_value(child.mappings)
   new.vertical_align = child.vertical_align
   new.horizontal_align = child.horizontal_align
   new.restrict = child.restrict and tbl_extend("keep", child.restrict, {}) or nil
@@ -318,7 +318,7 @@ function Component:_eval()
         comp = self.id,
         self_ref = self,
         ctx = rawget(self, "_ctx"),
-        on_select = self.on_select,
+        mappings = self.mappings,
       })
     end
 

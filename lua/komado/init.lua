@@ -125,7 +125,6 @@ function M.open(open_opts)
   end
 
   M.redraw(tabid)
-  keymap_m.attach(state)
 
   if opened_now then
     local cursor = state_m.recall_cursor(tabid)
@@ -244,6 +243,7 @@ function M.redraw(tabid)
 
   state.line_meta = line_meta
   render.flush(state.bufnr, lines, extmarks)
+  keymap_m.attach(state)
   fire("KomadoRenderPost", {
     tabid = tabid,
     bufnr = state.bufnr,
