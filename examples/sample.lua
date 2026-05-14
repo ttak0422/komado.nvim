@@ -90,14 +90,21 @@ local Buffers = {
   utils.expandable_list(function()
     return listed_buffers()
   end, function(item)
-    local marker = item.current and "▸ " or "  "
     local mod = item.modified and " [+]" or ""
+    local function open(_, ctx)
+      vim.cmd("wincmd p")
+      vim.api.nvim_set_current_buf(ctx.ctx.item.bufnr)
+    end
     return Line({
-      on_select = function(_, ctx)
-        vim.cmd("wincmd p")
-        vim.api.nvim_set_current_buf(ctx.ctx.item.bufnr)
-      end,
-      { provider = marker, hl = item.current and "Statement" or "Comment" },
+      mappings = {
+        ["<CR>"] = open,
+        ["<LeftMouse>"] = open,
+        ["d"] = function(_, ctx)
+          pcall(vim.api.nvim_buf_delete, ctx.ctx.item.bufnr, { force = false })
+          komado.redraw()
+        end,
+      },
+      { provider = "  " },
       { provider = tostring(item.bufnr), hl = "Number" },
       { provider = " " },
       { provider = item.display, hl = item.current and "Statement" or "Normal" },
@@ -265,12 +272,16 @@ local GitStatus = {
     end
 
     if item.kind == "section" then
+      local function toggle(self, ctx)
+        local key = ctx.ctx.item.key
+        self.collapsed[key] = not self.collapsed[key]
+        komado.redraw()
+      end
       return Line({
-        on_select = function(self, ctx)
-          local key = ctx.ctx.item.key
-          self.collapsed[key] = not self.collapsed[key]
-          komado.redraw()
-        end,
+        mappings = {
+          ["<CR>"] = toggle,
+          ["<LeftMouse>"] = toggle,
+        },
         { provider = item.collapsed and "  ▸ " or "  ▾ ", hl = "Comment" },
         { provider = item.label, hl = "Identifier" },
         { provider = " " },
@@ -279,12 +290,16 @@ local GitStatus = {
     end
 
     if item.kind == "file" then
+      local function open(_, ctx)
+        local selected = ctx.ctx.item
+        vim.cmd("wincmd p")
+        vim.cmd("edit " .. vim.fn.fnameescape(selected.root .. "/" .. git_file_target(selected.path)))
+      end
       return Line({
-        on_select = function(_, ctx)
-          local selected = ctx.ctx.item
-          vim.cmd("wincmd p")
-          vim.cmd("edit " .. vim.fn.fnameescape(selected.root .. "/" .. git_file_target(selected.path)))
-        end,
+        mappings = {
+          ["<CR>"] = open,
+          ["<LeftMouse>"] = open,
+        },
         { provider = "    " },
         { provider = item.code, hl = git_status_hl[item.code] or "Comment" },
         { provider = "  " },
@@ -344,21 +359,25 @@ local Marks = {
   utils.expandable_list(function(self)
     return self.marks
   end, function(m)
+    local function open(_, ctx)
+      local mark = ctx.ctx.item
+      vim.cmd("wincmd p")
+      if mark.bufnr and vim.api.nvim_buf_is_valid(mark.bufnr) then
+        vim.api.nvim_set_current_buf(mark.bufnr)
+      elseif mark.file ~= "" then
+        vim.cmd("edit " .. vim.fn.fnameescape(mark.file))
+      else
+        return
+      end
+      if mark.lnum > 0 then
+        pcall(vim.api.nvim_win_set_cursor, 0, { mark.lnum, mark.col or 0 })
+      end
+    end
     return Line({
-      on_select = function(_, ctx)
-        local mark = ctx.ctx.item
-        vim.cmd("wincmd p")
-        if mark.bufnr and vim.api.nvim_buf_is_valid(mark.bufnr) then
-          vim.api.nvim_set_current_buf(mark.bufnr)
-        elseif mark.file ~= "" then
-          vim.cmd("edit " .. vim.fn.fnameescape(mark.file))
-        else
-          return
-        end
-        if mark.lnum > 0 then
-          pcall(vim.api.nvim_win_set_cursor, 0, { mark.lnum, mark.col or 0 })
-        end
-      end,
+      mappings = {
+        ["<CR>"] = open,
+        ["<LeftMouse>"] = open,
+      },
       { provider = "  " },
       { provider = m.mark, hl = "Identifier" },
       { provider = "  " },
@@ -427,23 +446,12 @@ komado.setup({
     size = { ratio = 0.3, min = 38, max = 80 },
   },
   buffer = { filetype = "komado-sample" },
-  -- `<CR>` and `<LeftMouse>` are auto-mapped to invoke the row's `on_select` (each Line above defines its own).
-  -- Override either by listing it here.
+  -- Global mappings are for sidebar-wide commands. Row-local commands live under `Line({ mappings = ... })`.
   mappings = {
     ["q"] = function()
       komado.close()
     end,
     ["r"] = function()
-      komado.redraw()
-    end,
-    ["d"] = "delete_buffer",
-  },
-  commands = {
-    delete_buffer = function(_, ctx)
-      if not ctx or not ctx.ctx or not ctx.ctx.item or not ctx.ctx.item.bufnr then
-        return
-      end
-      pcall(vim.api.nvim_buf_delete, ctx.ctx.item.bufnr, { force = false })
       komado.redraw()
     end,
   },
