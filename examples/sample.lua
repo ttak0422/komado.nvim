@@ -107,17 +107,36 @@ local Buffers = {
 }
 
 -- ─────────────────────────────────────────────────────────────────────────
--- Module: Marks (conditional — only renders when global marks exist)
+-- Module: Marks (conditional — renders buffer-local and global marks)
 -- ─────────────────────────────────────────────────────────────────────────
-local function global_marks()
+local function collect_marks()
   local out = {}
+  local current_bufnr = vim.api.nvim_get_current_buf()
+  local function entry(m)
+    local pos = m.pos or {}
+    local bufnr = pos[1] or 0
+    local file = m.file or ""
+    if file == "" and bufnr > 0 and vim.api.nvim_buf_is_valid(bufnr) then
+      file = vim.api.nvim_buf_get_name(bufnr)
+    end
+    return {
+      mark = m.mark:sub(2),
+      bufnr = bufnr > 0 and bufnr or nil,
+      file = file,
+      lnum = pos[2] or 0,
+      col = math.max(0, (pos[3] or 1) - 1),
+    }
+  end
+
+  for _, m in ipairs(vim.fn.getmarklist(current_bufnr)) do
+    if m.mark:match("^'[a-z]$") then
+      out[#out + 1] = entry(m)
+    end
+  end
+
   for _, m in ipairs(vim.fn.getmarklist()) do
     if m.mark:match("^'[A-Z0-9]$") then
-      out[#out + 1] = {
-        mark = m.mark:sub(2),
-        file = m.file or "",
-        lnum = (m.pos or {})[2] or 0,
-      }
+      out[#out + 1] = entry(m)
     end
   end
   return out
@@ -126,9 +145,9 @@ end
 -- Note: condition() runs *before* init() in komado, so any value consumed by condition must be computed inside it (or before _eval).
 -- Here we side-effect into self.marks so the children can read it via metatable.
 local Marks = {
-  update = { "BufEnter", "CursorHold" },
+  update = { "BufEnter", "MarkSet", pattern = "*" },
   condition = function(self)
-    self.marks = global_marks()
+    self.marks = collect_marks()
     return #self.marks > 0
   end,
   Line({ provider = "▸ Marks", hl = "Statement" }),
@@ -138,13 +157,16 @@ local Marks = {
     return Line({
       on_select = function(_, ctx)
         local mark = ctx.ctx.item
-        if mark.file == "" then
+        vim.cmd("wincmd p")
+        if mark.bufnr and vim.api.nvim_buf_is_valid(mark.bufnr) then
+          vim.api.nvim_set_current_buf(mark.bufnr)
+        elseif mark.file ~= "" then
+          vim.cmd("edit " .. vim.fn.fnameescape(mark.file))
+        else
           return
         end
-        vim.cmd("wincmd p")
-        vim.cmd("edit " .. vim.fn.fnameescape(mark.file))
         if mark.lnum > 0 then
-          pcall(vim.api.nvim_win_set_cursor, 0, { mark.lnum, 0 })
+          pcall(vim.api.nvim_win_set_cursor, 0, { mark.lnum, mark.col or 0 })
         end
       end,
       { provider = "  " },
