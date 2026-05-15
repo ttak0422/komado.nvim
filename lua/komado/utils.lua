@@ -3,10 +3,6 @@ local dsl = require("komado.dsl")
 
 local M = {}
 
----Events used by helpers that need to re-render whenever the sidebar window changes size.
----Component:new shallow-copies update tables, so sharing the same array is safe.
-local RESIZE_EVENTS = { "VimResized", "WinResized" }
-
 ---Sidebar-window helper.
 ---Returns the current width (in cells) of the window rendering `self`'s sidebar, or 0 if no window is attached.
 ---@param self table component instance
@@ -21,7 +17,7 @@ local function sidebar_width(self)
 end
 
 ---Full-width horizontal rule that follows the sidebar window width.
----Re-renders on `VimResized` / `WinResized` so it stays flush after `:vert resize`.
+---Lifecycle resize redraws keep it flush after `:vert resize`.
 ---@param char? string repeated character (default "─")
 ---@param hl? string|table highlight name or attribute table
 ---@return table line component
@@ -29,7 +25,6 @@ function M.separator(char, hl)
   char = char or "─"
   return dsl.Line({
     hl = hl,
-    update = RESIZE_EVENTS,
     provider = function(self)
       local w = sidebar_width(self)
       if w <= 0 then
@@ -46,7 +41,6 @@ end
 function M.vertical_align()
   return {
     vertical_align = true,
-    update = RESIZE_EVENTS,
   }
 end
 
@@ -56,7 +50,6 @@ end
 function M.horizontal_align()
   return {
     horizontal_align = true,
-    update = RESIZE_EVENTS,
   }
 end
 

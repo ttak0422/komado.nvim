@@ -24,6 +24,17 @@ local function fire(pattern, data)
   })
 end
 
+local function schedule_redraw_open_sidebars()
+  vim.schedule(function()
+    for _, tabid in ipairs(vim.api.nvim_list_tabpages()) do
+      local st = state_m.get(tabid)
+      if st and st.bufnr and vim.api.nvim_buf_is_valid(st.bufnr) then
+        M.redraw(tabid)
+      end
+    end
+  end)
+end
+
 local function ensure_lifecycle_autocmds()
   vim.api.nvim_create_augroup(LIFECYCLE_AUGROUP, { clear = true })
   vim.api.nvim_create_autocmd("TabClosed", {
@@ -51,7 +62,12 @@ local function ensure_lifecycle_autocmds()
       state_m.foreach(function(_, st)
         window_m.refit(st)
       end)
+      schedule_redraw_open_sidebars()
     end,
+  })
+  vim.api.nvim_create_autocmd("WinResized", {
+    group = LIFECYCLE_AUGROUP,
+    callback = schedule_redraw_open_sidebars,
   })
 end
 
@@ -76,16 +92,7 @@ function M.setup(opts)
   state_m.register(spec)
 
   sidebar = Sidebar.new(spec)
-  sidebar._on_update = function()
-    vim.schedule(function()
-      for _, tabid in ipairs(vim.api.nvim_list_tabpages()) do
-        local st = state_m.get(tabid)
-        if st and st.bufnr and vim.api.nvim_buf_is_valid(st.bufnr) then
-          M.redraw(tabid)
-        end
-      end
-    end)
-  end
+  sidebar._on_update = schedule_redraw_open_sidebars
 
   ensure_lifecycle_autocmds()
 end
