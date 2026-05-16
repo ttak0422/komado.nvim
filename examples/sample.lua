@@ -446,7 +446,6 @@ komado.setup({
     position = "left",
     size = { ratio = 0.3, min = 38, max = 80 },
   },
-  buffer = { filetype = "komado-sample" },
   -- Global mappings are for sidebar-wide commands. Row-local commands live under `Line({ mappings = ... })`.
   mappings = {
     ["q"] = function()
