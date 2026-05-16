@@ -4,6 +4,7 @@ local NAMED_PREFIX = "Komado_hl_"
 local current_scope = "global"
 local caches = {} -- scope -> { key (string) -> hl_group name }
 local counters = {} -- scope -> integer
+local applied_keys = {} -- scope -> { hl_group name -> key (string) }
 
 local function normalize_scope(scope)
   local s = tostring(scope or "global"):gsub("[^%w_]", "_")
@@ -26,6 +27,15 @@ local function next_name()
   local counter = (counters[current_scope] or 0) + 1
   counters[current_scope] = counter
   return NAMED_PREFIX .. current_scope .. "_" .. counter
+end
+
+local function get_applied_keys()
+  local applied = applied_keys[current_scope]
+  if not applied then
+    applied = {}
+    applied_keys[current_scope] = applied
+  end
+  return applied
 end
 
 local function value_to_key(v)
@@ -113,7 +123,11 @@ function M.ensure_hl_group(attrs)
   end
 
   local name = next_name()
-  vim.api.nvim_set_hl(0, name, plain)
+  local applied = get_applied_keys()
+  if applied[name] ~= key then
+    vim.api.nvim_set_hl(0, name, plain)
+    applied[name] = key
+  end
   cache[key] = name
   return name
 end
@@ -122,6 +136,7 @@ function M.reset()
   current_scope = "global"
   caches = {}
   counters = {}
+  applied_keys = {}
 end
 
 return M
