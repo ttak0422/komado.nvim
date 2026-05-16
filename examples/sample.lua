@@ -253,62 +253,63 @@ local GitStatus = {
       untracked = false,
     },
   },
-  init = function(self)
-    self.status = git_status()
-    self.rows = git_rows(self.status, self.collapsed)
-  end,
   {
     update = { "BufEnter", "BufWritePost", "DirChanged", "FocusGained", "ShellCmdPost" },
+    init = function(self)
+      self.status = git_status()
+      self.rows = git_rows(self.status, self.collapsed)
+    end,
+    utils.expandable_list(function(self)
+      return self.rows
+    end, function(item, _, list)
+      if item.kind == "root" then
+        return Line({
+          { provider = "▸ Git", hl = "Statement" },
+          { provider = " " },
+          { provider = item.branch, hl = item.clean and "String" or "Comment" },
+        })
+      end
+
+      if item.kind == "section" then
+        local function toggle(_, ctx)
+          local key = ctx.ctx.item.key
+          list.collapsed[key] = not list.collapsed[key]
+          list:set_sidebar_attr("_sidebar_cache", nil)
+          komado.redraw()
+        end
+        return Line({
+          mappings = {
+            ["<CR>"] = toggle,
+            ["<LeftMouse>"] = toggle,
+          },
+          { provider = item.collapsed and "  ▸ " or "  ▾ ", hl = "Comment" },
+          { provider = item.label, hl = "Identifier" },
+          { provider = " " },
+          { provider = tostring(item.count), hl = "Number" },
+        })
+      end
+
+      if item.kind == "file" then
+        local function open(_, ctx)
+          local selected = ctx.ctx.item
+          vim.cmd("wincmd p")
+          vim.cmd("edit " .. vim.fn.fnameescape(selected.root .. "/" .. git_file_target(selected.path)))
+        end
+        return Line({
+          mappings = {
+            ["<CR>"] = open,
+            ["<LeftMouse>"] = open,
+          },
+          { provider = "    " },
+          { provider = item.code, hl = git_status_hl[item.code] or "Comment" },
+          { provider = "  " },
+          { provider = item.path },
+        })
+      end
+
+      return Line({ provider = item.text, hl = "Comment" })
+    end),
   },
-  utils.expandable_list(function(self)
-    return self.rows
-  end, function(item)
-    if item.kind == "root" then
-      return Line({
-        { provider = "▸ Git", hl = "Statement" },
-        { provider = " " },
-        { provider = item.branch, hl = item.clean and "String" or "Comment" },
-      })
-    end
-
-    if item.kind == "section" then
-      local function toggle(self, ctx)
-        local key = ctx.ctx.item.key
-        self.collapsed[key] = not self.collapsed[key]
-        komado.redraw()
-      end
-      return Line({
-        mappings = {
-          ["<CR>"] = toggle,
-          ["<LeftMouse>"] = toggle,
-        },
-        { provider = item.collapsed and "  ▸ " or "  ▾ ", hl = "Comment" },
-        { provider = item.label, hl = "Identifier" },
-        { provider = " " },
-        { provider = tostring(item.count), hl = "Number" },
-      })
-    end
-
-    if item.kind == "file" then
-      local function open(_, ctx)
-        local selected = ctx.ctx.item
-        vim.cmd("wincmd p")
-        vim.cmd("edit " .. vim.fn.fnameescape(selected.root .. "/" .. git_file_target(selected.path)))
-      end
-      return Line({
-        mappings = {
-          ["<CR>"] = open,
-          ["<LeftMouse>"] = open,
-        },
-        { provider = "    " },
-        { provider = item.code, hl = git_status_hl[item.code] or "Comment" },
-        { provider = "  " },
-        { provider = item.path },
-      })
-    end
-
-    return Line({ provider = item.text, hl = "Comment" })
-  end),
 }
 
 -- ─────────────────────────────────────────────────────────────────────────
