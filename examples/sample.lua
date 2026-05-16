@@ -87,7 +87,7 @@ end
 local Buffers = {
   update = { "BufAdd", "BufDelete", "BufEnter", "BufModifiedSet" },
   Line({ provider = "▸ Buffers", hl = "Statement" }),
-  utils.expandable_list(function()
+  utils.mapped_list(function()
     return listed_buffers()
   end, function(item)
     local mod = item.modified and " [+]" or ""
@@ -259,7 +259,7 @@ local GitStatus = {
       self.status = git_status()
       self.rows = git_rows(self.status, self.collapsed)
     end,
-    utils.expandable_list(function(self)
+    utils.mapped_list(function(self)
       return self.rows
     end, function(item, _, list)
       if item.kind == "root" then
@@ -357,7 +357,7 @@ local Marks = {
     return #self.marks > 0
   end,
   Line({ provider = "▸ Marks", hl = "Statement" }),
-  utils.expandable_list(function(self)
+  utils.mapped_list(function(self)
     return self.marks
   end, function(m)
     local function open(_, ctx)

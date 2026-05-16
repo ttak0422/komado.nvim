@@ -130,13 +130,13 @@ function M.surround(delimiters, color, component)
   }
 end
 
----Expand an array of items into per-row child components.
+---Map an array of items into per-row child components.
 ---The list is rebuilt each evaluation; render_item should return a component spec (typically a Line).
 ---Each generated child has `self._ctx = { item = item, index = i }` set so that keymap handlers can read the underlying item via `state:get_context()`.
 ---@param get_items fun(self: table): any[]
 ---@param render_item fun(item: any, i: integer, self: table): table
 ---@return table
-function M.expandable_list(get_items, render_item)
+function M.mapped_list(get_items, render_item)
   return {
     init = function(self)
       local items = get_items(self) or {}
