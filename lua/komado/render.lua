@@ -22,6 +22,7 @@ local function new_line(comp_id, self_ref, ctx, mappings)
     text = "",
     segs = {},
     horizontal_aligns = {}, -- byte positions where horizontal alignment spaces should be inserted
+    horizontal_center = false,
     comp_id = comp_id,
     self_ref = self_ref,
     ctx = ctx,
@@ -76,12 +77,24 @@ local function resolve_horizontal_aligns(buf, cur)
   end)
 end
 
+local function resolve_horizontal_center(buf, cur)
+  if not cur.horizontal_center or not buf.width or buf.width <= 0 then
+    return
+  end
+  local blanks = buf.width - vim.fn.strdisplaywidth(cur.text)
+  if blanks <= 0 then
+    return
+  end
+  insert_spaces(cur, 0, math.floor(blanks / 2))
+end
+
 local function flush(buf)
   local cur = buf.current
   if not cur then
     return
   end
   resolve_horizontal_aligns(buf, cur)
+  resolve_horizontal_center(buf, cur)
   buf.lines[#buf.lines + 1] = cur.text
   local row = #buf.lines - 1
   for _, seg in ipairs(cur.segs) do
@@ -179,6 +192,7 @@ local function traverse(tree, buf)
           flush(buf)
         end
         buf.current = new_line(node.comp, node.self_ref, node.ctx, node.mappings)
+        buf.current.horizontal_center = node.horizontal_center
       elseif node._komado_close then
         ensure_current(buf)
         flush(buf)

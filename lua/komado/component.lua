@@ -18,6 +18,7 @@ local default_restrict = {
   fallthrough = true,
   vertical_align = true,
   horizontal_align = true,
+  horizontal_center = true,
   -- Component variant tag set via DSL (currently only "line" from dsl.Line).
   -- Used by _eval to bracket children with LINE_OPEN/LINE_CLOSE sentinels.
   _kind = true,
@@ -113,6 +114,7 @@ end
 ---@field mappings? table row-local key handlers
 ---@field vertical_align? boolean  vertical alignment marker resolved by render.collect
 ---@field horizontal_align? boolean  horizontal alignment marker resolved within the current line
+---@field horizontal_center? boolean  center the rendered Line content within the sidebar width
 ---@field restrict? table<string, true>
 ---@field _kind? "line"  component variant tag (see default_restrict)
 ---@field _sidebar_cache? table<string, table>  per state.id frozen subtree cache
@@ -146,6 +148,7 @@ function Component:new(child, index)
   new.mappings = copy_user_value(child.mappings)
   new.vertical_align = child.vertical_align
   new.horizontal_align = child.horizontal_align
+  new.horizontal_center = child.horizontal_center
   new.restrict = child.restrict and tbl_extend("keep", child.restrict, {}) or nil
   new._kind = child._kind
 
@@ -319,6 +322,7 @@ function Component:_eval()
         self_ref = self,
         ctx = rawget(self, "_ctx"),
         mappings = self.mappings,
+        horizontal_center = self.horizontal_center,
       })
     end
 

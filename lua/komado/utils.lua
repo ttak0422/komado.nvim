@@ -53,6 +53,22 @@ function M.horizontal_align()
   }
 end
 
+---Center one or more components on a single line.
+---Unlike `horizontal_align()`, this centers the whole rendered line content within the sidebar width.
+---@vararg table component specs
+---@return table line component
+function M.center(...)
+  local children = { ... }
+  if #children == 1 and type(children[1]) == "table" and children[1]._kind == "line" then
+    return M.clone(children[1], { horizontal_center = true })
+  end
+  local line = { horizontal_center = true }
+  for i, child in ipairs(children) do
+    line[i] = child
+  end
+  return dsl.Line(line)
+end
+
 ---Deep-merge `with` into a copy of `block` and return the result.
 ---Useful for specializing a shared component spec without mutating the original.
 ---@generic T: table
