@@ -5,10 +5,6 @@ local default_window = {
   size = 40,
 }
 
-local default_buffer = {
-  filetype = "komado",
-}
-
 local function check_positive_int(name, v)
   if v == nil then
     return
@@ -82,7 +78,6 @@ function M.normalize(opts)
   opts = opts or {}
   local spec = {}
   spec.window = vim.tbl_deep_extend("keep", opts.window or {}, default_window)
-  spec.buffer = vim.tbl_deep_extend("keep", opts.buffer or {}, default_buffer)
   spec.mappings = opts.mappings or {}
   spec.commands = opts.commands or {}
   spec.root = opts.root or {}

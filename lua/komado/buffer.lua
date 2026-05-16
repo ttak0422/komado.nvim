@@ -1,6 +1,6 @@
 local M = {}
 
-local function apply_buf_options(bufnr, buf_opts)
+local function apply_buf_options(bufnr)
   local bo = vim.bo[bufnr]
   bo.buftype = "nofile"
   bo.bufhidden = "hide"
@@ -8,9 +8,7 @@ local function apply_buf_options(bufnr, buf_opts)
   bo.modifiable = false
   bo.modeline = false
   bo.buflisted = false
-  if buf_opts.filetype then
-    bo.filetype = buf_opts.filetype
-  end
+  bo.filetype = "komado"
 end
 
 ---Return the state's scratch buffer, creating it when missing or invalid.
@@ -22,12 +20,10 @@ function M.get_or_create(state)
   end
 
   local bufnr = vim.api.nvim_create_buf(false, true)
-  local buf_opts = state.spec.buffer or {}
 
-  apply_buf_options(bufnr, buf_opts)
+  apply_buf_options(bufnr)
 
-  local base = buf_opts.name or "komado://"
-  local bufname = string.format("%s#tab%d", base, state.tabid)
+  local bufname = string.format("komado://#tab%d", state.tabid)
   pcall(vim.api.nvim_buf_set_name, bufnr, bufname)
 
   state.bufnr = bufnr
