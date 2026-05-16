@@ -72,13 +72,15 @@ end
 ---Merge a parent's resolved hl into the current component's hl.
 ---If parent has `force = true`, parent wins on key collisions; otherwise child wins (the default for hl inheritance).
 local function merge_hl(parent_hl, self_hl)
+  self_hl = self_hl and tbl_extend("force", {}, self_hl) or {}
   if not parent_hl then
     return self_hl
   end
+  parent_hl = tbl_extend("force", {}, parent_hl)
   return tbl_extend(parent_hl.force and "keep" or "force", parent_hl, self_hl)
 end
 
-local function push_provider(tree, value, hl_group, comp_id)
+local function push_provider(tree, value, hl_attrs, comp_id)
   if value == nil or value == "" then
     return
   end
@@ -88,11 +90,11 @@ local function push_provider(tree, value, hl_group, comp_id)
         tbl_insert(tree, LINE_BREAK)
       end
       if s ~= nil and s ~= "" then
-        tbl_insert(tree, { text = tostring(s), hl = hl_group, comp = comp_id })
+        tbl_insert(tree, { text = tostring(s), hl = hl_attrs, comp = comp_id })
       end
     end
   else
-    tbl_insert(tree, { text = tostring(value), hl = hl_group, comp = comp_id })
+    tbl_insert(tree, { text = tostring(value), hl = hl_attrs, comp = comp_id })
   end
 end
 
@@ -305,8 +307,6 @@ function Component:_eval()
 
   self.merged_hl = merge_hl(self:nonlocal("merged_hl"), hl)
 
-  local hl_group = hl_mod.ensure_hl_group(self.merged_hl)
-
   if self.vertical_align then
     tbl_insert(tree, V_ALIGN)
   elseif self.horizontal_align then
@@ -325,7 +325,7 @@ function Component:_eval()
     local provider = self.provider
     if provider then
       local v = type(provider) == "function" and provider(self) or provider
-      push_provider(tree, v, hl_group, self.id)
+      push_provider(tree, v, self.merged_hl, self.id)
     end
 
     local pick_child = self.pick_child

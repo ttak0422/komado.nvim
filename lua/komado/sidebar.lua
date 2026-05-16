@@ -1,4 +1,5 @@
 local Component = require("komado.component")
+local highlights = require("komado.highlights")
 local render = require("komado.render")
 
 ---@class komado.Sidebar
@@ -48,6 +49,7 @@ function Sidebar:eval(state)
     height = vim.api.nvim_win_get_height(state.winid)
     width = vim.api.nvim_win_get_width(state.winid)
   end
+  highlights.begin_render(state.id)
   return render.collect(self.root, { height = height, width = width })
 end
 

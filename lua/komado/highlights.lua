@@ -1,8 +1,52 @@
 local M = {}
 
 local NAMED_PREFIX = "Komado_hl_"
-local cache = {} -- key (string) -> hl_group name
-local counter = 0
+local current_scope = "global"
+local caches = {} -- scope -> { key (string) -> hl_group name }
+local counters = {} -- scope -> integer
+
+local function normalize_scope(scope)
+  local s = tostring(scope or "global"):gsub("[^%w_]", "_")
+  if s == "" then
+    return "global"
+  end
+  return s
+end
+
+local function get_scope_cache()
+  local cache = caches[current_scope]
+  if not cache then
+    cache = {}
+    caches[current_scope] = cache
+  end
+  return cache
+end
+
+local function next_name()
+  local counter = (counters[current_scope] or 0) + 1
+  counters[current_scope] = counter
+  return NAMED_PREFIX .. current_scope .. "_" .. counter
+end
+
+local function value_to_key(v)
+  if type(v) ~= "table" then
+    return tostring(v)
+  end
+
+  local keys = {}
+  for k in pairs(v) do
+    keys[#keys + 1] = k
+  end
+  table.sort(keys, function(a, b)
+    return tostring(a) < tostring(b)
+  end)
+
+  local parts = {}
+  for _, k in ipairs(keys) do
+    parts[#parts + 1] = tostring(k) .. "=" .. value_to_key(v[k])
+  end
+  return "{" .. table.concat(parts, ";") .. "}"
+end
 
 local function attrs_to_key(attrs)
   -- Order keys for a stable hash regardless of pairs() order.
@@ -13,9 +57,19 @@ local function attrs_to_key(attrs)
   table.sort(keys)
   local parts = {}
   for _, k in ipairs(keys) do
-    parts[#parts + 1] = k .. "=" .. tostring(attrs[k])
+    parts[#parts + 1] = k .. "=" .. value_to_key(attrs[k])
   end
   return table.concat(parts, ";")
+end
+
+---Start a render pass for a sidebar instance.
+---Generated group names are reused within the scope on each pass, keeping the
+---total number of Komado highlight groups bounded by one render's unique attrs.
+---@param scope any
+function M.begin_render(scope)
+  current_scope = normalize_scope(scope)
+  caches[current_scope] = {}
+  counters[current_scope] = 0
 end
 
 ---Resolve a highlight name to its attribute table.
@@ -52,21 +106,22 @@ function M.ensure_hl_group(attrs)
   end
 
   local key = attrs_to_key(plain)
+  local cache = get_scope_cache()
   local cached = cache[key]
   if cached then
     return cached
   end
 
-  counter = counter + 1
-  local name = NAMED_PREFIX .. counter
+  local name = next_name()
   vim.api.nvim_set_hl(0, name, plain)
   cache[key] = name
   return name
 end
 
 function M.reset()
-  cache = {}
-  counter = 0
+  current_scope = "global"
+  caches = {}
+  counters = {}
 end
 
 return M

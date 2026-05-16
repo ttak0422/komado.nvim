@@ -1,5 +1,7 @@
 local M = {}
 
+local hl_mod = require("komado.highlights")
+
 local NS = vim.api.nvim_create_namespace("komado")
 
 local function new_buffer(opts)
@@ -111,11 +113,15 @@ local function append_segment(buf, seg)
   local cur = ensure_current(buf)
   local start = #cur.text
   cur.text = cur.text .. seg.text
-  if seg.hl then
+  local hl = seg.hl
+  if type(hl) == "table" then
+    hl = hl_mod.ensure_hl_group(hl)
+  end
+  if hl then
     cur.segs[#cur.segs + 1] = {
       col = start,
       end_col = #cur.text,
-      hl = seg.hl,
+      hl = hl,
     }
   end
 end
