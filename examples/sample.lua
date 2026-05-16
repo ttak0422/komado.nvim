@@ -14,11 +14,11 @@ local utils = require("komado.utils")
 -- Module: Header (static)
 -- ─────────────────────────────────────────────────────────────────────────
 local Header = {
-  Line({
+  utils.center(
     { provider = "■ ", hl = "Statement" },
     { provider = "komado", hl = "Title" },
-    { provider = " sample", hl = "Comment" },
-  }),
+    { provider = " sample", hl = "Comment" }
+  ),
   utils.separator("─", "Comment"),
 }
 
