@@ -12,7 +12,7 @@ local function each_lhs(lhs, fn)
   end
 end
 
-local function iter_line_mappings(ctx, fn)
+local function iter_mappings(ctx, fn)
   local mappings = ctx and ctx.mappings
   if type(mappings) ~= "table" then
     return
@@ -29,7 +29,7 @@ end
 
 local function find_line_rhs(ctx, lhs)
   local found
-  iter_line_mappings(ctx, function(candidate_lhs, rhs)
+  iter_mappings(ctx, function(candidate_lhs, rhs)
     if found then
       return
     end
@@ -45,6 +45,30 @@ local function find_line_rhs(ctx, lhs)
   return nil
 end
 
+local function segment_at_col(ctx, col)
+  if not ctx or not col then
+    return nil
+  end
+  for _, seg in ipairs(ctx.segments or {}) do
+    if col >= seg.col and col < seg.end_col then
+      return seg
+    end
+  end
+  return nil
+end
+
+local function has_segment_mapping(ctx, lhs)
+  if not ctx then
+    return false
+  end
+  for _, seg in ipairs(ctx.segments or {}) do
+    if find_line_rhs(seg, lhs) then
+      return true
+    end
+  end
+  return false
+end
+
 local function invoke_rhs(state, rhs, ctx)
   if type(rhs) == "string" then
     local fn = state.commands[rhs]
@@ -58,12 +82,43 @@ local function invoke_rhs(state, rhs, ctx)
   end
 end
 
-local function dispatch_line_mapping(state, lhs, ctx)
+local function dispatch_line_mapping(state, lhs, ctx, col)
   ctx = ctx or state:get_context()
+  if col then
+    if has_segment_mapping(ctx, lhs) then
+      local seg = segment_at_col(ctx, col)
+      local seg_rhs = find_line_rhs(seg, lhs)
+      if seg_rhs then
+        invoke_rhs(state, seg_rhs, seg)
+      end
+      return
+    end
+  end
   local rhs = find_line_rhs(ctx, lhs)
   if rhs then
     invoke_rhs(state, rhs, ctx)
   end
+end
+
+local function byte_col_at_display_col(line, display_col)
+  display_col = math.max(0, display_col or 0)
+  for char = 1, vim.fn.strchars(line) do
+    if display_col < vim.fn.strdisplaywidth(vim.fn.strcharpart(line, 0, char)) then
+      return vim.fn.byteidx(line, char - 1)
+    end
+  end
+  return #line
+end
+
+local function cursor_col(state)
+  if not state.winid or not vim.api.nvim_win_is_valid(state.winid) then
+    return nil
+  end
+  local ok, pos = pcall(vim.api.nvim_win_get_cursor, state.winid)
+  if not ok then
+    return nil
+  end
+  return pos[2]
 end
 
 ---Mouse variant of the row-local mapping dispatcher.
@@ -78,8 +133,10 @@ local function dispatch_select_at_mouse(state)
   if not row or row < 1 then
     return
   end
-  pcall(vim.api.nvim_win_set_cursor, state.winid, { row, 0 })
-  dispatch_line_mapping(state, "<LeftMouse>", state.line_meta[row])
+  local line = vim.api.nvim_buf_get_lines(state.bufnr, row - 1, row, false)[1] or ""
+  local col = byte_col_at_display_col(line, (mp.column or 1) - 1)
+  pcall(vim.api.nvim_win_set_cursor, state.winid, { row, col })
+  dispatch_line_mapping(state, "<LeftMouse>", state.line_meta[row], col)
 end
 
 local function collect_visual_rows()
@@ -164,11 +221,18 @@ function M.attach(state)
 
   local line_lhs = {}
   for _, ctx in pairs(state.line_meta or {}) do
-    iter_line_mappings(ctx, function(lhs, _)
+    iter_mappings(ctx, function(lhs, _)
       each_lhs(lhs, function(one)
         line_lhs[one] = true
       end)
     end)
+    for _, seg in ipairs(ctx.segments or {}) do
+      iter_mappings(seg, function(lhs, _)
+        each_lhs(lhs, function(one)
+          line_lhs[one] = true
+        end)
+      end)
+    end
   end
 
   for lhs, _ in pairs(line_lhs) do
@@ -178,7 +242,7 @@ function M.attach(state)
       end)
     else
       set_buffer_keymap(state, "n", lhs, function()
-        dispatch_line_mapping(state, lhs)
+        dispatch_line_mapping(state, lhs, nil, cursor_col(state))
       end)
     end
   end

@@ -100,19 +100,33 @@ local function flush(buf)
   buf.lines[#buf.lines + 1] = cur.text
   local row = #buf.lines - 1
   for _, seg in ipairs(cur.segs) do
-    buf.extmarks[#buf.extmarks + 1] = {
-      row = row,
-      col = seg.col,
-      end_col = seg.end_col,
-      hl = seg.hl,
-    }
+    if seg.hl then
+      buf.extmarks[#buf.extmarks + 1] = {
+        row = row,
+        col = seg.col,
+        end_col = seg.end_col,
+        hl = seg.hl,
+      }
+    end
   end
   if cur.comp_id then
+    local segments = {}
+    for _, seg in ipairs(cur.segs) do
+      segments[#segments + 1] = {
+        col = seg.col,
+        end_col = seg.end_col,
+        comp_id = seg.comp_id,
+        self_ref = seg.self_ref,
+        ctx = seg.ctx,
+        mappings = seg.mappings,
+      }
+    end
     buf.line_meta[row + 1] = {
       comp_id = cur.comp_id,
       self_ref = cur.self_ref,
       ctx = cur.ctx,
       mappings = cur.mappings,
+      segments = segments,
     }
   end
   buf.current = nil
@@ -133,13 +147,15 @@ local function append_segment(buf, seg)
   if type(hl) == "table" then
     hl = hl_mod.ensure_hl_group(hl)
   end
-  if hl then
-    cur.segs[#cur.segs + 1] = {
-      col = start,
-      end_col = #cur.text,
-      hl = hl,
-    }
-  end
+  cur.segs[#cur.segs + 1] = {
+    col = start,
+    end_col = #cur.text,
+    hl = hl,
+    comp_id = seg.comp,
+    self_ref = seg.self_ref,
+    ctx = seg.ctx,
+    mappings = seg.mappings,
+  }
 end
 
 local function shift_rows(buf, start, amount)

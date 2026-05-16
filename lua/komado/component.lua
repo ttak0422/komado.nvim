@@ -81,7 +81,7 @@ local function merge_hl(parent_hl, self_hl)
   return tbl_extend(parent_hl.force and "keep" or "force", parent_hl, self_hl)
 end
 
-local function push_provider(tree, value, hl_attrs, comp_id)
+local function push_provider(tree, value, hl_attrs, comp_id, self_ref, ctx, mappings)
   if value == nil or value == "" then
     return
   end
@@ -91,11 +91,25 @@ local function push_provider(tree, value, hl_attrs, comp_id)
         tbl_insert(tree, LINE_BREAK)
       end
       if s ~= nil and s ~= "" then
-        tbl_insert(tree, { text = tostring(s), hl = hl_attrs, comp = comp_id })
+        tbl_insert(tree, {
+          text = tostring(s),
+          hl = hl_attrs,
+          comp = comp_id,
+          self_ref = self_ref,
+          ctx = ctx,
+          mappings = mappings,
+        })
       end
     end
   else
-    tbl_insert(tree, { text = tostring(value), hl = hl_attrs, comp = comp_id })
+    tbl_insert(tree, {
+      text = tostring(value),
+      hl = hl_attrs,
+      comp = comp_id,
+      self_ref = self_ref,
+      ctx = ctx,
+      mappings = mappings,
+    })
   end
 end
 
@@ -329,7 +343,15 @@ function Component:_eval()
     local provider = self.provider
     if provider then
       local v = type(provider) == "function" and provider(self) or provider
-      push_provider(tree, v, self.merged_hl, self.id)
+      push_provider(
+        tree,
+        v,
+        self.merged_hl,
+        self.id,
+        self,
+        rawget(self, "_ctx") or self:nonlocal("_ctx"),
+        self.mappings
+      )
     end
 
     local pick_child = self.pick_child
