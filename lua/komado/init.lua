@@ -11,6 +11,7 @@ local M = {}
 
 local sidebar -- single Sidebar instance, shared across tabs
 local LIFECYCLE_AUGROUP = "Komado_lifecycle"
+local redraw_pending = false
 
 ---Fire a `User` autocmd with komado-specific pattern.
 ---Users can listen via `vim.api.nvim_create_autocmd("User", { pattern = "KomadoWindowAfterOpen", ... })`.
@@ -25,7 +26,12 @@ local function fire(pattern, data)
 end
 
 local function schedule_redraw_open_sidebars()
+  if redraw_pending then
+    return
+  end
+  redraw_pending = true
   vim.schedule(function()
+    redraw_pending = false
     for _, tabid in ipairs(vim.api.nvim_list_tabpages()) do
       local st = state_m.get(tabid)
       if st and st.bufnr and vim.api.nvim_buf_is_valid(st.bufnr) then
