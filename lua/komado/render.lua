@@ -13,6 +13,7 @@ local function new_buffer(opts)
     line_meta = {}, -- [1-indexed row] = { comp_id, self_ref, ctx }
     vertical_aligns = {}, -- 1-indexed line insertion positions for vertical alignment fillers
     width = opts.width,
+    padding_left = opts.padding_left or 0,
     current = nil, -- { text, segs, comp_id, self_ref, ctx }
   }
 end
@@ -95,6 +96,7 @@ local function flush(buf)
   end
   resolve_horizontal_aligns(buf, cur)
   resolve_horizontal_center(buf, cur)
+  insert_spaces(cur, 0, buf.padding_left)
   buf.lines[#buf.lines + 1] = cur.text
   local row = #buf.lines - 1
   for _, seg in ipairs(cur.segs) do

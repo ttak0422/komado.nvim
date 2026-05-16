@@ -3,20 +3,20 @@ local dsl = require("komado.dsl")
 
 local M = {}
 
----Sidebar-window helper.
----Returns the current width (in cells) of the window rendering `self`'s sidebar, or 0 if no window is attached.
+---Sidebar content helper.
+---Returns the current render width (in cells) after global padding is removed, or 0 if no window is attached.
 ---@param self table component instance
 ---@return integer
-local function sidebar_width(self)
+local function content_width(self)
   local sb = self._sidebar
   local st = sb and sb._state
-  if not st or not st.winid or not vim.api.nvim_win_is_valid(st.winid) then
+  if not st then
     return 0
   end
-  return vim.api.nvim_win_get_width(st.winid)
+  return st._content_width or 0
 end
 
----Full-width horizontal rule that follows the sidebar window width.
+---Full-width horizontal rule that follows the padded sidebar content width.
 ---Lifecycle resize redraws keep it flush after `:vert resize`.
 ---@param char? string repeated character (default "─")
 ---@param hl? string|table highlight name or attribute table
@@ -26,7 +26,7 @@ function M.separator(char, hl)
   return dsl.Line({
     hl = hl,
     provider = function(self)
-      local w = sidebar_width(self)
+      local w = content_width(self)
       if w <= 0 then
         return ""
       end

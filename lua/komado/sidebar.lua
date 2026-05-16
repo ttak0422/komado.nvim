@@ -39,18 +39,21 @@ function Sidebar:eval(state)
   self._state_id = state.id
   self._state = state -- exposed to components (e.g. utils.separator)
   self._updatable = {}
-  -- Force a fresh root tree on every render so stale segments do not leak in when condition flips, while keeping _sidebar_cache (per state.id) intact.
-  rawset(self.root, "_tree", nil)
-  self.root:_eval()
-  self.root:freeze_cache()
   local height
   local width
   if state.winid and vim.api.nvim_win_is_valid(state.winid) then
     height = vim.api.nvim_win_get_height(state.winid)
     width = vim.api.nvim_win_get_width(state.winid)
   end
+  local padding = state.spec.window.padding or 0
+  local content_width = width and math.max(0, width - padding * 2) or nil
+  state._content_width = content_width
+  -- Force a fresh root tree on every render so stale segments do not leak in when condition flips, while keeping _sidebar_cache (per state.id) intact.
+  rawset(self.root, "_tree", nil)
+  self.root:_eval()
+  self.root:freeze_cache()
   highlights.begin_render(state.id)
-  return render.collect(self.root, { height = height, width = width })
+  return render.collect(self.root, { height = height, width = content_width, padding_left = padding })
 end
 
 return Sidebar

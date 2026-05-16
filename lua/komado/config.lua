@@ -3,18 +3,23 @@ local M = {}
 local default_window = {
   position = "left",
   size = 40,
+  padding = 0,
 }
 
-local function check_positive_int(name, v)
+local function check_int(name, v, min)
   if v == nil then
     return
   end
   if type(v) ~= "number" then
-    error(("komado: window.size.%s must be a number (got %s)"):format(name, type(v)))
+    error(("komado: window.%s must be a number (got %s)"):format(name, type(v)))
   end
-  if v < 1 then
-    error(("komado: window.size.%s must be >= 1 (got %s)"):format(name, tostring(v)))
+  if v < min then
+    error(("komado: window.%s must be >= %d (got %s)"):format(name, min, tostring(v)))
   end
+end
+
+local function check_positive_int(name, v)
+  check_int(name, v, 1)
 end
 
 local function check_ratio(v)
@@ -44,7 +49,7 @@ end
 ---@return table { columns?: number, ratio?: number, min?: number, max?: number }
 local function normalize_size(size)
   if type(size) == "number" then
-    check_positive_int("columns", size)
+    check_positive_int("size.columns", size)
     return { columns = math.floor(size) }
   end
   if type(size) ~= "table" then
@@ -56,10 +61,10 @@ local function normalize_size(size)
   if size.columns == nil and size.ratio == nil then
     error("komado: window.size requires either `columns` or `ratio`")
   end
-  check_positive_int("columns", size.columns)
+  check_positive_int("size.columns", size.columns)
   check_ratio(size.ratio)
-  check_positive_int("min", size.min)
-  check_positive_int("max", size.max)
+  check_positive_int("size.min", size.min)
+  check_positive_int("size.max", size.max)
   if size.min and size.max and size.min > size.max then
     error(("komado: window.size.min (%s) must be <= max (%s)"):format(tostring(size.min), tostring(size.max)))
   end
@@ -69,6 +74,16 @@ local function normalize_size(size)
     min = size.min,
     max = size.max,
   }
+end
+
+---@param padding number|nil
+---@return integer
+local function normalize_padding(padding)
+  if padding == nil then
+    return 0
+  end
+  check_int("padding", padding, 0)
+  return math.floor(padding)
 end
 
 ---Normalize the user's setup spec, filling in window/buffer defaults and validating constrained fields.
@@ -86,6 +101,7 @@ function M.normalize(opts)
     error(("komado: window.position must be 'left' or 'right' (got %q)"):format(tostring(spec.window.position)))
   end
   spec.window.size = normalize_size(spec.window.size)
+  spec.window.padding = normalize_padding(spec.window.padding)
   return spec
 end
 
