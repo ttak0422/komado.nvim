@@ -23,8 +23,7 @@ function M.get_or_create(state)
 
   apply_buf_options(bufnr)
 
-  local bufname = string.format("komado://#tab%d", state.tabid)
-  pcall(vim.api.nvim_buf_set_name, bufnr, bufname)
+  pcall(vim.api.nvim_buf_set_name, bufnr, "komado://sidebar")
 
   state.bufnr = bufnr
   return bufnr

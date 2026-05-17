@@ -25,70 +25,130 @@ local function fire(pattern, data)
   })
 end
 
-local function schedule_redraw_open_sidebars()
+local function schedule_redraw()
   if redraw_pending then
     return
   end
   redraw_pending = true
   vim.schedule(function()
     redraw_pending = false
-    for _, tabid in ipairs(vim.api.nvim_list_tabpages()) do
-      local st = state_m.get(tabid)
-      if st and st.bufnr and vim.api.nvim_buf_is_valid(st.bufnr) then
-        M.redraw(tabid)
-      end
+    local st = state_m.get()
+    if st and st.bufnr and vim.api.nvim_buf_is_valid(st.bufnr) then
+      M.redraw()
     end
   end)
 end
 
+---Open the sidebar window in the current tab using the singleton buffer.
+---Shared by user-initiated `M.open` and the TabEnter auto-reattach. `silent = true` skips KomadoWindow* events to avoid spamming listeners on every tab switch.
+---@param state table
+---@param opts { focus?: boolean, silent?: boolean }
+local function attach_window_in_current_tab(state, opts)
+  local prior_win = vim.api.nvim_get_current_win()
+  local bufnr = buffer_m.get_or_create(state)
+  local opened_now = false
+  if not window_m.is_open(state) then
+    if not opts.silent then
+      fire("KomadoWindowBeforeOpen", { bufnr = bufnr })
+    end
+    window_m.open(state, bufnr)
+    opened_now = true
+  end
+
+  local tabid = vim.api.nvim_get_current_tabpage()
+  if prior_win and prior_win ~= state.winid and vim.api.nvim_win_is_valid(prior_win) then
+    state_m.set_prior_win(tabid, prior_win)
+  end
+
+  if not opts.focus and prior_win then
+    if prior_win ~= state.winid and vim.api.nvim_win_is_valid(prior_win) then
+      vim.api.nvim_set_current_win(prior_win)
+    end
+  end
+
+  M.redraw()
+
+  if opened_now then
+    local cursor = state_m.recall_cursor(tabid)
+    if cursor and vim.api.nvim_win_is_valid(state.winid) then
+      pcall(vim.api.nvim_win_set_cursor, state.winid, cursor)
+    end
+    if not opts.silent then
+      fire("KomadoWindowAfterOpen", { bufnr = bufnr, winid = state.winid })
+    end
+  end
+end
+
+---Save the leaving tab's cursor and close the sidebar window. Buffer + is_open flag are untouched so TabEnter can reattach.
+local function detach_window_for_tab_leave()
+  local st = state_m.get()
+  if not st or not st.winid then
+    return
+  end
+  if vim.api.nvim_win_is_valid(st.winid) then
+    local ok, cursor = pcall(vim.api.nvim_win_get_cursor, st.winid)
+    if ok then
+      state_m.save_cursor(vim.api.nvim_get_current_tabpage(), cursor)
+    end
+  end
+  window_m.close(st)
+end
+
+local function reattach_window_for_tab_enter()
+  if not state_m.is_open() then
+    return
+  end
+  local st = state_m.get_or_create()
+  attach_window_in_current_tab(st, { silent = true })
+end
+
 local function ensure_lifecycle_autocmds()
   vim.api.nvim_create_augroup(LIFECYCLE_AUGROUP, { clear = true })
+
   vim.api.nvim_create_autocmd("TabClosed", {
     group = LIFECYCLE_AUGROUP,
     callback = function()
-      -- TabClosed.args.match is "<tabnr>" (1-indexed), but we key on tabid (handle).
-      -- After close that mapping isn't recoverable, so just walk live tabs and dispose anything that's no longer in the list.
-      local valid = {}
+      local live = {}
       for _, t in ipairs(vim.api.nvim_list_tabpages()) do
-        valid[t] = true
+        live[t] = true
       end
-      state_m.foreach(function(tabid, st)
-        if not valid[tabid] then
-          window_m.close(st)
-          buffer_m.delete(st)
-          state_m.dispose(tabid)
-        end
-      end)
+      state_m.gc_tabs(live)
     end,
   })
+
   -- Re-fit ratio-based sidebars when the outer editor is resized.
   vim.api.nvim_create_autocmd("VimResized", {
     group = LIFECYCLE_AUGROUP,
     callback = function()
-      state_m.foreach(function(_, st)
+      local st = state_m.get()
+      if st then
         window_m.refit(st)
-      end)
-      schedule_redraw_open_sidebars()
+      end
+      schedule_redraw()
     end,
   })
+
   vim.api.nvim_create_autocmd("WinResized", {
     group = LIFECYCLE_AUGROUP,
-    callback = schedule_redraw_open_sidebars,
+    callback = schedule_redraw,
+  })
+
+  vim.api.nvim_create_autocmd("TabLeave", {
+    group = LIFECYCLE_AUGROUP,
+    callback = detach_window_for_tab_leave,
+  })
+
+  vim.api.nvim_create_autocmd("TabEnter", {
+    group = LIFECYCLE_AUGROUP,
+    callback = reattach_window_for_tab_enter,
   })
 end
 
 ---@param opts table  { window, buffer, mappings, commands, root }
 function M.setup(opts)
-  -- Tear down any prior instance: close all open sidebar windows / buffers and drop registered update autocmds.
-  -- Otherwise repeated `setup` calls (lazy reload, :luafile %, plugin manager re-source) would leak orphans.
+  -- Tear down any prior instance so repeat setup (lazy reload, :luafile %, plugin manager re-source) does not leak the existing window/buffer/autocmds.
   if sidebar then
-    local tabids = {}
-    state_m.foreach(function(tabid, _)
-      tabids[#tabids + 1] = tabid
-    end)
-    for _, tabid in ipairs(tabids) do
-      M.close({ tabid = tabid })
-    end
+    M.close()
   end
   events.clear_augroup()
   state_m._reset()
@@ -98,125 +158,77 @@ function M.setup(opts)
   state_m.register(spec)
 
   sidebar = Sidebar.new(spec)
-  sidebar._on_update = schedule_redraw_open_sidebars
+  sidebar._on_update = schedule_redraw
 
   ensure_lifecycle_autocmds()
 end
 
----Render the sidebar for the current tab, creating the buffer/window if needed.
----`open` is intentionally restricted to the current tab: opening a sidebar on a different tab while the user is sitting elsewhere would create a window outside the actual target.
----Use `redraw(tabid)` / `close({ tabid = ... })` for cross-tab operations instead.
+---Open the singleton sidebar in the current tab and mark it as "logically open" so subsequent TabEnter events re-attach it automatically.
 ---@param open_opts? { focus?: boolean }
 function M.open(open_opts)
   open_opts = open_opts or {}
   if not sidebar then
     error("komado: sidebar not configured (call komado.setup first)")
   end
-  local tabid = vim.api.nvim_get_current_tabpage()
-  local state = state_m.get_or_create(tabid)
-
-  local prior_win = vim.api.nvim_get_current_win()
-
-  local bufnr = buffer_m.get_or_create(state)
-  local opened_now = false
-  if not window_m.is_open(state) then
-    fire("KomadoWindowBeforeOpen", { tabid = tabid, bufnr = bufnr })
-    window_m.open(state, bufnr)
-    opened_now = true
-  end
-
-  -- Remember the user's "home" window so subsequent redraws (especially the ones triggered by autocmds while the user is on a different tab) can evaluate providers in that window's context via nvim_win_call.
-  if prior_win and prior_win ~= state.winid and vim.api.nvim_win_is_valid(prior_win) then
-    state.prior_win = prior_win
-  end
-
-  -- Restore focus to the user's window *before* the first render so providers that read `vim.bo.*` / `vim.fn.bufname()` see the user's buffer rather than the sidebar buffer they were just dropped into.
-  if not open_opts.focus and prior_win then
-    if prior_win ~= state.winid and vim.api.nvim_win_is_valid(prior_win) then
-      vim.api.nvim_set_current_win(prior_win)
-    end
-  end
-
-  M.redraw(tabid)
-
-  if opened_now then
-    local cursor = state_m.recall_cursor(tabid)
-    if cursor and vim.api.nvim_win_is_valid(state.winid) then
-      pcall(vim.api.nvim_win_set_cursor, state.winid, cursor)
-    end
-    fire("KomadoWindowAfterOpen", {
-      tabid = tabid,
-      bufnr = bufnr,
-      winid = state.winid,
-    })
-  end
+  local state = state_m.get_or_create()
+  state_m.set_open(true)
+  attach_window_in_current_tab(state, { focus = open_opts.focus, silent = false })
   return state
 end
 
----Close the window and dispose the buffer for the current (or given) tab.
----@param close_opts? { tabid?: integer, keep_buffer?: boolean }
+---Close the sidebar globally: tear down the current tab's window, drop the buffer, and clear is_open so TabEnter no longer auto-attaches.
+---@param close_opts? { keep_buffer?: boolean }
 function M.close(close_opts)
   close_opts = close_opts or {}
-  local tabid = close_opts.tabid or vim.api.nvim_get_current_tabpage()
-  local state = state_m.get(tabid)
+  local state = state_m.get()
   if not state then
+    state_m.set_open(false)
     return
   end
   if state.winid and vim.api.nvim_win_is_valid(state.winid) then
     local ok, cursor = pcall(vim.api.nvim_win_get_cursor, state.winid)
     if ok then
-      state_m.save_cursor(tabid, cursor)
+      state_m.save_cursor(vim.api.nvim_get_current_tabpage(), cursor)
     end
   end
-  fire("KomadoWindowBeforeClose", {
-    tabid = tabid,
-    bufnr = state.bufnr,
-    winid = state.winid,
-  })
+  fire("KomadoWindowBeforeClose", { bufnr = state.bufnr, winid = state.winid })
   window_m.close(state)
   if not close_opts.keep_buffer then
     buffer_m.delete(state)
-    state_m.dispose(tabid)
+    state_m.dispose()
   end
-  fire("KomadoWindowAfterClose", { tabid = tabid })
+  state_m.set_open(false)
+  fire("KomadoWindowAfterClose", {})
 end
 
 ---@param toggle_opts? { focus?: boolean }
 function M.toggle(toggle_opts)
   toggle_opts = toggle_opts or {}
-  local tabid = vim.api.nvim_get_current_tabpage()
-  local state = state_m.get(tabid)
+  local state = state_m.get()
   if state and window_m.is_open(state) then
-    M.close({ tabid = tabid })
+    M.close()
   else
     M.open({ focus = toggle_opts.focus })
   end
 end
 
----Pick the window whose buffer should drive provider evaluation for `state`.
----Resolution order:
----  1. current tab → user's current non-sidebar window (and remember it as `state.prior_win` so a later non-current redraw reuses it)
----  2. non-current tab → that tab's most recently active window via `nvim_tabpage_get_win`, unless it points at the sidebar itself
----  3. saved `state.prior_win`, if it still belongs to the target tab
----  4. any other non-sidebar window in the target tab (last resort)
-local function find_provider_win(state, tabid)
-  if tabid == vim.api.nvim_get_current_tabpage() then
-    local cur = vim.api.nvim_get_current_win()
-    if cur ~= state.winid and vim.api.nvim_win_is_valid(cur) then
-      -- Persist so subsequent redraws of *this* tab from another tab still evaluate against the user's actual home window.
-      state.prior_win = cur
-      return cur
-    end
-  else
-    local recent = vim.api.nvim_tabpage_get_win(tabid)
-    if recent ~= state.winid and vim.api.nvim_win_is_valid(recent) then
-      return recent
-    end
+---Pick the window whose buffer should drive provider evaluation for the singleton state.
+---Resolution order (within the current tab):
+---  1. user's current non-sidebar window — also memoized as that tab's prior_win
+---  2. the tab's saved prior_win, if still valid and in this tab
+---  3. any non-sidebar window in the current tab (last resort)
+local function find_provider_win(state)
+  local tabid = vim.api.nvim_get_current_tabpage()
+  local cur = vim.api.nvim_get_current_win()
+  if cur ~= state.winid and vim.api.nvim_win_is_valid(cur) then
+    state_m.set_prior_win(tabid, cur)
+    return cur
   end
-  if state.prior_win and vim.api.nvim_win_is_valid(state.prior_win) then
-    local ok, owner = pcall(vim.api.nvim_win_get_tabpage, state.prior_win)
-    if ok and owner == tabid and state.prior_win ~= state.winid then
-      return state.prior_win
+  local saved = state_m.get_prior_win(tabid)
+  if saved and vim.api.nvim_win_is_valid(saved) then
+    local ok, owner = pcall(vim.api.nvim_win_get_tabpage, saved)
+    if ok and owner == tabid and saved ~= state.winid then
+      return saved
     end
   end
   for _, w in ipairs(vim.api.nvim_tabpage_list_wins(tabid)) do
@@ -227,27 +239,24 @@ local function find_provider_win(state, tabid)
   return nil
 end
 
----Re-evaluate the component tree and write the result to the buffer.
----No-op if the state has no buffer yet.
----@param tabid? integer
-function M.redraw(tabid)
-  tabid = tabid or vim.api.nvim_get_current_tabpage()
-  local state = state_m.get(tabid)
+---Re-evaluate the component tree against the current tab and write the result to the singleton buffer.
+function M.redraw()
+  local state = state_m.get()
   if not sidebar or not state or not state.bufnr then
     return
   end
   if not vim.api.nvim_buf_is_valid(state.bufnr) then
     return
   end
-  fire("KomadoRenderPre", { tabid = tabid, bufnr = state.bufnr })
+  fire("KomadoRenderPre", { bufnr = state.bufnr })
 
-  -- Evaluate providers in the tab's "current non-sidebar" window so reads of `vim.bo.*` / `vim.fn.bufname("%")` follow the user's split focus and the right tab.
+  -- Evaluate providers in the current tab's "user" window so reads of `vim.bo.*` / `vim.fn.bufname("%")` reflect the user's split focus, not the sidebar buffer.
   -- nvim_win_call avoids firing TabEnter/Leave autocmds.
   local lines, extmarks, line_meta
   local function do_eval()
     lines, extmarks, line_meta = sidebar:eval(state)
   end
-  local target = find_provider_win(state, tabid)
+  local target = find_provider_win(state)
   if target then
     vim.api.nvim_win_call(target, do_eval)
   else
@@ -258,16 +267,14 @@ function M.redraw(tabid)
   render.flush(state.bufnr, lines, extmarks)
   keymap_m.attach(state)
   fire("KomadoRenderPost", {
-    tabid = tabid,
     bufnr = state.bufnr,
     n_lines = #lines,
   })
 end
 
----@param tabid? integer
 ---@return table?
-function M.get_state(tabid)
-  return state_m.get(tabid)
+function M.get_state()
+  return state_m.get()
 end
 
 return M
