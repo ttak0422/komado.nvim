@@ -132,11 +132,19 @@ function M.ensure_hl_group(attrs)
   return name
 end
 
-function M.reset()
-  current_scope = "global"
+---Drop the dynamic highlight cache so the next render re-issues `nvim_set_hl`.
+---A colorscheme reload clears every generated `Komado_hl_*` group; without this,
+---`applied_keys` keeps matching the same key/name and `ensure_hl_group` skips
+---the `nvim_set_hl` call, leaving inline-hl groups empty.
+function M.invalidate()
   caches = {}
   counters = {}
   applied_keys = {}
+end
+
+function M.reset()
+  current_scope = "global"
+  M.invalidate()
 end
 
 return M

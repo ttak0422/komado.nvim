@@ -6,6 +6,7 @@ local window_m = require("komado.window")
 local keymap_m = require("komado.keymap")
 local render = require("komado.render")
 local events = require("komado.events")
+local highlights = require("komado.highlights")
 
 local M = {}
 
@@ -141,6 +142,16 @@ local function ensure_lifecycle_autocmds()
   vim.api.nvim_create_autocmd("TabEnter", {
     group = LIFECYCLE_AUGROUP,
     callback = reattach_window_for_tab_enter,
+  })
+
+  -- A colorscheme reload clears every generated Komado_hl_* group. Drop the
+  -- cache so the next render re-issues nvim_set_hl for inline-hl components.
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = LIFECYCLE_AUGROUP,
+    callback = function()
+      highlights.invalidate()
+      schedule_redraw()
+    end,
   })
 end
 
