@@ -10,6 +10,8 @@ local function apply_win_options(winid)
   wo.list = false
   wo.spell = false
   wo.cursorline = true
+  -- Keep the current width during equalization; explicit resizing still works.
+  wo.winfixwidth = true
 end
 
 ---Resolve a normalized `size` table into the integer column count to apply.
