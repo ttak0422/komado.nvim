@@ -16,8 +16,8 @@ to [lazy.nvim](https://github.com/folke/lazy.nvim):
 { "ttak0422/komado.nvim" }
 ```
 
-No other plugins are required. The example below is tested with Neovim 0.12.5;
-compatibility with older versions has not been verified.
+No other plugins are required. The sidebar regression tests run on Neovim 0.11.4,
+0.12.5, and 0.12.6; compatibility with older versions has not been verified.
 
 ## Setup
 
@@ -72,6 +72,12 @@ file rather than the sidebar.
   count or a table such as `{ ratio = 0.3, min = 30, max = 60 }`.
 - Add `mappings` to a `Line` for row actions. Mouse actions require an explicit
   `<LeftMouse>` mapping and Neovim mouse support to be enabled.
+- Files opened in the sidebar (for example with `:edit`, Telescope, or LSP) move
+  to the tab's last editing window after the opener finishes. If that window is
+  unavailable, Komado uses another ordinary editing window or creates a split.
+  It avoids replacing modified buffers, terminals, other panels, floating windows,
+  and windows with `winfixbuf`. Background opens do not change your focus.
+  Recovery uses buffer events; commands that suppress autocommands can bypass it.
 
 See [the sample configuration](examples/sample.lua) for buffer, Git, mark, and
 clock sections, including row actions and automatic updates. These are examples
@@ -84,6 +90,13 @@ Run the sidebar window regression tests with the local Neovim installation:
 
 ```sh
 nvim --headless -u NONE -i NONE -l tests/window_width.lua
+nvim --headless -u NONE -i NONE -l tests/file_opening.lua
 ```
+
+Set `TELESCOPE_RTP` and `PLENARY_RTP` to their plugin directories to also run
+the real Telescope file and buffer selection tests. CI includes both with pinned
+versions. The routing tests cover direct edits, buffer switches, LSP cursor
+placement, safe split selection, tabs, terminal preservation, and background focus.
+They use isolated Neovim instances without your configuration.
 
 Run `nix flake check` for the configured lint and format checks.

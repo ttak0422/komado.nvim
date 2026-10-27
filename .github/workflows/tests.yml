@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        neovim: [v0.11.4, v0.12.5, v0.12.6]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+      - uses: actions/checkout@v4
+        with:
+          repository: nvim-telescope/telescope.nvim
+          ref: 40aedd8a68c78a656a10a8d62d80c54af59420fb
+          path: .test-deps/telescope
+      - uses: actions/checkout@v4
+        with:
+          repository: nvim-lua/plenary.nvim
+          ref: 74b06c6c75e4eeb3108ec01852001636d85a932b
+          path: .test-deps/plenary
+      - run: nvim --headless -u NONE -i NONE -l tests/window_width.lua
+      - run: nvim --headless -u NONE -i NONE -l tests/file_opening.lua
+        env:
+          TELESCOPE_RTP: ${{ github.workspace }}/.test-deps/telescope
+          PLENARY_RTP: ${{ github.workspace }}/.test-deps/plenary

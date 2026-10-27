@@ -13,6 +13,7 @@ local M = {}
 local sidebar -- single Sidebar instance, shared across tabs
 local LIFECYCLE_AUGROUP = "Komado_lifecycle"
 local redraw_pending = false
+local restore_pending = false
 
 ---Fire a `User` autocmd with komado-specific pattern.
 ---Users can listen via `vim.api.nvim_create_autocmd("User", { pattern = "KomadoWindowAfterOpen", ... })`.
@@ -86,6 +87,7 @@ local function detach_window_for_tab_leave()
   if not st or not st.winid then
     return
   end
+  window_m.restore_buffer(st)
   if vim.api.nvim_win_is_valid(st.winid) then
     local ok, cursor = pcall(vim.api.nvim_win_get_cursor, st.winid)
     if ok then
@@ -105,6 +107,26 @@ end
 
 local function ensure_lifecycle_autocmds()
   vim.api.nvim_create_augroup(LIFECYCLE_AUGROUP, { clear = true })
+
+  vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
+    group = LIFECYCLE_AUGROUP,
+    callback = function()
+      local st = state_m.get()
+      if restore_pending or not st or not window_m.is_open(st) or vim.api.nvim_win_get_buf(st.winid) == st.bufnr then
+        return
+      end
+      restore_pending = true
+      local winid = st.winid
+      local prior_win = state_m.get_prior_win(vim.api.nvim_win_get_tabpage(winid))
+      vim.schedule(function()
+        restore_pending = false
+        local current = state_m.get()
+        if current then
+          window_m.restore_buffer(current, current.winid == winid and prior_win or nil)
+        end
+      end)
+    end,
+  })
 
   vim.api.nvim_create_autocmd("TabClosed", {
     group = LIFECYCLE_AUGROUP,
@@ -196,6 +218,7 @@ function M.close(close_opts)
     state_m.set_open(false)
     return
   end
+  window_m.restore_buffer(state)
   if state.winid and vim.api.nvim_win_is_valid(state.winid) then
     local ok, cursor = pcall(vim.api.nvim_win_get_cursor, state.winid)
     if ok then
